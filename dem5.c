@@ -16,6 +16,26 @@ on the kml file
 #define MXFSZ (1<<16)
 #define BUF 4 /* tested for a low a value as 2, and is fine */
 
+#define CONDREALLOC(x, b, c, a, t); \
+    if((x)>=((b)-0)) { \
+        (b) += (c); \
+        (a)=realloc((a), (b)*sizeof(t)); \
+    }
+
+typedef struct /* sandestr: start and end string, this delimits and interior section of the file */
+{
+    char *ss; /* start string */
+    size_t ssz; /* start string sz*/
+    char *es; /* seq */
+    size_t esz; /* seq sz*/
+} sandestr; /* start and end strng struct */
+
+typedef struct /* strblk_t: str blk type */
+{
+    char *sb; /* string block */
+    size_t sbsz; /* start string sz*/
+} strblk_t; /* start and end strng struct */
+
 size_t fszfind(FILE *fp)
 {
     fseek(fp, 0, SEEK_END);
@@ -23,14 +43,6 @@ size_t fszfind(FILE *fp)
     rewind(fp);
     return fbytsz;
 }
-
-typedef struct
-{
-    char *ss; /* start string */
-    size_t ssz; /* start string sz*/
-    char *es; /* seq */
-    size_t esz; /* seq sz*/
-} sandestr; /* start and end strng struct */
 
 char *scas(char *s, size_t *sz) /* a function to scan the token strings and convert newlines double symbols to their proper 0x0A equivalents. Also the size is returned in the arguments */
 {
@@ -68,10 +80,10 @@ char *scas(char *s, size_t *sz) /* a function to scan the token strings and conv
     return ts;
 }
 
-char *retmat_frfile(char *fname, sandestr *sestr, size_t *stsz) /* return matrix from file */
+strblk_t *retmat_frfile(char *fname, sandestr *sestr, int *sbasz) /* return matrix from file */
 {
     /* declarations */
-int i;
+    int i;
     FILE *fp=fopen(fname,"r");
     if(fp == NULL) {
         printf("The file you specified could not be opened. Wrong name, wrong directory?\n"); 
@@ -86,17 +98,22 @@ int i;
     char *fslurp = malloc(sizeof(char)*(fsz+1));
     fread(fslurp, sizeof(char), (size_t)fsz, fp);
     fslurp[fsz]='\0'; /* makes sure fslurp is a string */
-
-    /* so now we can close out file */
-    fclose(fp);
+    fclose(fp); /* so now we can close out file */
 
     /*  now we get a pointer which will scan the big string */
-    char seenss=0;
-    char *p=fslurp;
+    char seenss=0; /* marker for having seem the startstring */
+    char *p=fslurp; /* as it says, we shall slurp the input file into here */
     char *bp=NULL; // Ok, this is the back pointer that is 8 ssz characters back from p
     char *stcp=calloc(sestr->ssz+1, sizeof(char));
     char *etcp=calloc(sestr->esz+1, sizeof(char));
     size_t st_b=0, ed_b=0; // start byte end byte, important to initialize them */
+
+    int sbbuf=BUF;
+    strblk_t *sbt=malloc(sbbuf*sizeof(strblk_t));
+    for(i=0;i<sbbuf;++i) {
+        sbt[i].sb=NULL;
+        sbt[i].sbsz=0;
+    }
 
     for(i=0; i<fsz; i++) {
         /* assign the back pointer bp */
@@ -134,18 +151,19 @@ int i;
                 continue;
         }
     }
-    size_t mstsz = ed_b - st_b;
-    char *matstr=calloc(mstsz+1, sizeof(char));
-    strncpy(matstr, fslurp+st_b, mstsz);
+    sbt[0].sbsz = ed_b - st_b;
+    sbt[0].sb=realloc(sbt[0].sb, (sbt[0].sbsz+1)*sizeof(char));
+    strncpy(sbt[0].sb, fslurp+st_b, sbt[0].sbsz);
 
     p=NULL;
     bp=NULL;
+    *sbasz=1;
+    sbt=realloc(sbt, (*sbasz)*sizeof(strblk_t));
     free(stcp);
     free(etcp);
     free(fslurp);
 
-    *stsz=mstsz;
-    return matstr;
+    return sbt;
 }
 
 int main(int argc, char **argv)
@@ -156,13 +174,13 @@ int main(int argc, char **argv)
     int ovector[OVECCOUNT]; /* very important, this is for the substring ... the part of the targetxt which matches the pattern */
     /* the ovec will appear to hold the start and end byte of a match, with reference to the total targetxt. The third of the triplets is the lenght
      * qhich appears to be put in there for convenience purposes */
-    int ttxtlen;
     int i;
-
 
     /* argument accounting */
     if(argc!=5) {
         printf("Error. Pls supply 4 arguments (regex, name of text file, startstringtoken and endstringtoken.\n");
+        printf("Typical usage on a KML file:\n");
+        printf("./dem5 \"-*\\d+\\.\\d+,\\d+\\.\\d+,\\d+\\.\\d+\" alcabre-cuvi.kml \"LineString><coordinates>\"  \"</coordinates></LineString\"");
         exit(EXIT_FAILURE);
     }
 
@@ -171,10 +189,13 @@ int main(int argc, char **argv)
     sandestr *sestr=malloc(sizeof(sandestr)); /* declare start-end-string struct */
     sestr->ss=scas(argv[3], &(sestr->ssz)); /* use the scas function to properly represent newliens and get the two string sizes. */
     sestr->es=scas(argv[4], &(sestr->esz));
-    size_t ttsz=0;
-    char *targetxt=retmat_frfile(argv[2], sestr, &ttsz);
+#if defined DBG
+    printf("Interpreted sizes, startstr: %d, endstr: %d\n", sestr->ssz, sestr->esz); 
+#endif
+    int sbasz=0; /// str block array size
+    strblk_t *sbt=retmat_frfile(argv[2], sestr, &sbasz);
+    //char *targetxt=retmat_frfile(argv[2], sestr, &ttsz);
 
-    ttxtlen = (int)ttsz;
     /* OK, now we're goign for our first pcre function call, we'll need two error variables. Pattern gets compiled into "re" here and errors can be captured */
     const char *error;
     int erroffset;
@@ -194,13 +215,13 @@ int main(int argc, char **argv)
     /* If the compilation succeeded, we can go on to execute. in order to do a     *
      * pattern match against the targetxt string. This does just ONE match. If *
      * further matching is needed, it will be done later. the returned integer
-	reflects the amoutn of free space in the output vector because after the first three entries
- (which are the full pattern match itself), the subgroups are all stored. */
+     reflects the amoutn of free space in the output vector because after the first three entries
+     (which are the full pattern match itself), the subgroups are all stored. */
     int rc = pcre_exec(
             re,                   /* the compiled pattern */
             NULL,                 /* no extra data - we didn't study the pattern */
-            targetxt,              /* the targetxt string */
-            ttxtlen,       /* the length of the targetxt */
+            sbt[0].sb,              /* the targetxt string */
+            sbt[0].sbsz,       /* the length of the targetxt */
             0,                    /* start at offset 0 in the targetxt */
             0,                    /* default options */
             ovector,              /* output vector for substring information */
@@ -211,7 +232,7 @@ int main(int argc, char **argv)
         switch(rc) {
             case PCRE_ERROR_NOMATCH:
                 printf("No match\n"); break;
-            /* Handle other special cases if you like */
+                /* Handle other special cases if you like */
             default: printf("Matching error %d\n", rc); break;
         }
         pcre_free(re);     /* With an error we should bail out gracefully, that is release memory used for the compiled pattern */
@@ -223,7 +244,7 @@ int main(int argc, char **argv)
     printf("Return val from pcre_exec was %i\n", rc);
 
     /* We have found the first match within the targetxt string. Now that could have included substrings don't forget.
-	If the output *
+       If the output *
      * vector wasn't big enough, say so. Then output any substrings that were captured. */
     /* The output vector wasn't big enough */
     if (rc == 0) {
@@ -234,7 +255,7 @@ int main(int argc, char **argv)
     /* Show substrings stored in the output vector by number. Obviously, in a real
        application you might want to do things other than print them. */
     for (i = 1; i < rc; i++) { /* i=0 is the string for the full match ... but once we know there's been a full match, hardly worth the bother printing it. */
-        char *substring_start = targetxt + ovector[2*i];
+        char *substring_start = sbt[0].sb + ovector[2*i];
         int substring_length = ovector[2*i+1] - ovector[2*i];
         printf("%2d: %.*s\n", i, substring_length, substring_start);
     }
@@ -273,7 +294,7 @@ int main(int argc, char **argv)
         for (i = 0; i < namecount; i++) {
             int n = (tabptr[0] << 8) | tabptr[1];
             printf("(%d) %*s: %.*s\n", n, name_entry_size - 3, tabptr + 2,
-                    ovector[2*n+1] - ovector[2*n], targetxt + ovector[2*n]);
+                    ovector[2*n+1] - ovector[2*n], sbt[0].sb + ovector[2*n]);
             tabptr += name_entry_size;
         }
     }
@@ -288,9 +309,9 @@ int main(int argc, char **argv)
            same point to see if a non-empty match can be found. */
 
         if (ovector[0] == ovector[1]) {
-            if (ovector[0] == ttxtlen)
+            if (ovector[0] == sbt[0].sbsz)
                 break;
-//            options = PCRE_NOTEMPTY_ATSTART | PCRE_ANCHORED;
+            //            options = PCRE_NOTEMPTY_ATSTART | PCRE_ANCHORED;
             options = PCRE_NOTEMPTY | PCRE_ANCHORED;
         }
 
@@ -298,8 +319,8 @@ int main(int argc, char **argv)
         rc = pcre_exec(
                 re,                   /* the compiled pattern */
                 NULL,                 /* no extra data - we didn't study the pattern */
-                targetxt,              /* the targetxt string */
-                ttxtlen,       /* the length of the targetxt */
+                sbt[0].sb,              /* the targetxt string */
+                sbt[0].sbsz,       /* the length of the targetxt */
                 start_offset,         /* starting offset in the targetxt */
                 options,              /* options */
                 ovector,              /* output vector for substring information */
@@ -331,7 +352,7 @@ int main(int argc, char **argv)
         /* As before, show substrings stored in the output vector by number, and then
            also any named substrings. */
         for (i = 0; i < rc; i++) {
-            char *substring_start = targetxt + ovector[2*i];
+            char *substring_start = sbt[0].sb + ovector[2*i];
             int substring_length = ovector[2*i+1] - ovector[2*i];
             printf("%.*s\n", substring_length, substring_start);
         }
@@ -341,14 +362,16 @@ int main(int argc, char **argv)
             printf("Named substrings\n");
             for (i = 0; i < namecount; i++) {
                 int n = (tabptr[0] << 8) | tabptr[1];
-                printf("(%d) %*s: %.*s\n", n, name_entry_size - 3, tabptr + 2, ovector[2*n+1] - ovector[2*n], targetxt + ovector[2*n]);
+                printf("(%d) %*s: %.*s\n", n, name_entry_size - 3, tabptr + 2, ovector[2*n+1] - ovector[2*n], sbt[0].sb + ovector[2*n]);
                 tabptr += name_entry_size;
             }
         }
     } /* End of loop to find second and subsequent matches */
 
     pcre_free(re); /* Release memory used for the compiled pattern */
-    free(targetxt);
+    for(i=0;i<sbasz;++i) 
+        free(sbt[0].sb);
+    free(sbt);
     free(sestr->ss);
     free(sestr->es);
     free(sestr);
