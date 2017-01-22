@@ -1,7 +1,8 @@
 CC=gcc
-CFLAGS=-g -Wall
+CFLAGS=-O3
+DCFLAGS=-g -Wall -DDBG
 SPECLIBS=-lpcre
-EXECUTABLES=pcredemo dem2 dem3 dem4 dem5 dem6 dem7 pcregrep nx2phy_cheap dem5a dem4a gen0
+EXECUTABLES=pcredemo dem2 dem3 dem4 dem5 dem5_d dem6 dem7 pcregrep nx2phy_cheap dem5a dem4a gen0
 
 # mm1, an xercise in memory maps ... sys/ctypes-h need to be in place.
 mm1: mm1.c
@@ -20,10 +21,12 @@ dem4: dem4.c
 	${CC} ${CFLAGS} -o $@ $^ ${SPECLIBS}
 
 
-# dem5 reaches a satisfactory level of maturity. Runs a, by default, global pattern search on text between a pair of identified tokens
+# dem5: this parses a KML file. Of course this can be done with libxml, this is just a raw way of doing it.
 # best effect is seen on kml route file, you're able to search for the lat/long/alt triplet.
 dem5: dem5.c
 	${CC} ${CFLAGS} -o $@ $^ ${SPECLIBS}
+dem5_d: dem5.c
+	${CC} ${DCFLAGS} -o $@ $^ ${SPECLIBS}
 
 # based on dem5, though this is more customised for the Nexusfile extraction, but either it doesn't workor is not very robust.
 dem6: dem6.c

@@ -25,9 +25,9 @@ on the kml file
 typedef struct /* sandestr: start and end string, this delimits and interior section of the file */
 {
     char *ss; /* start string */
-    size_t ssz; /* start string sz*/
+    int ssz; /* start string sz*/
     char *es; /* seq */
-    size_t esz; /* seq sz*/
+    int esz; /* seq sz*/
 } sandestr; /* start and end strng struct */
 
 typedef struct /* strblk_t: str blk type */
@@ -44,7 +44,7 @@ size_t fszfind(FILE *fp)
     return fbytsz;
 }
 
-char *scas(char *s, size_t *sz) /* a function to scan the token strings and convert newlines double symbols to their proper 0x0A equivalents. Also the size is returned in the arguments */
+char *scas(char *s, int *sz) /* a function to scan the token strings and convert newlines double symbols to their proper 0x0A equivalents. Also the size is returned in the arguments */
 {
     int j=0;
     size_t tsz=strlen(s);
@@ -76,7 +76,7 @@ char *scas(char *s, size_t *sz) /* a function to scan the token strings and conv
     }
     *(ts+j)='\0';
     ts=realloc(ts, (j+1)*sizeof(char));
-    *sz=(size_t)strlen(ts);
+    *sz=(int)strlen(ts);
     return ts;
 }
 
@@ -102,6 +102,7 @@ strblk_t *retmat_frfile(char *fname, sandestr *sestr, int *sbasz) /* return matr
 
     /*  now we get a pointer which will scan the big string */
     char seenss=0; /* marker for having seem the startstring */
+    int nseens=0 /* Number of seen blocks */, oldnseens=0 /* previous value of it. */;
     char *p=fslurp; /* as it says, we shall slurp the input file into here */
     char *bp=NULL; // Ok, this is the back pointer that is 8 ssz characters back from p
     char *stcp=calloc(sestr->ssz+1, sizeof(char));
@@ -138,26 +139,31 @@ strblk_t *retmat_frfile(char *fname, sandestr *sestr, int *sbasz) /* return matr
                 st_b=(size_t)((bp+sestr->ssz)-fslurp);
                 seenss=1;
             } else
-                continue;
+                continue; // false alarm
         }
-        /* the endingrng we're interested in */
+        /* on the ending side, we're interested in */
         if( seenss & (*(bp+sestr->esz-3)==*(sestr->es+sestr->esz-3)) & (*(bp+sestr->esz-2)==*(sestr->es+sestr->esz-2)) & (*(bp+sestr->esz-1)==*(sestr->es+sestr->esz-1)) ) { // if these 3 chars are matched, thing look promising, but not guaranteed. 
             memcpy(etcp, bp, sestr->esz);
             if( (strcmp(etcp, sestr->es)) == 0 ) {
                 ed_b=(size_t)(bp - fslurp); // double verified
                 seenss=0;
+                nseens++; /*Ok, we have just been though one block */
                 break;
             } else
                 continue;
         }
+        if(nseens != oldnseens) {
+            CONDREALLOC(nseens, sbbuf, BUF, sbt, strblk_t);
+            sbt[nseens].sbsz = ed_b - st_b;
+            sbt[nseens].sb=realloc(sbt[nseens].sb, (sbt[nseens].sbsz+1)*sizeof(char));
+            strncpy(sbt[nseens].sb, fslurp+st_b, sbt[nseens].sbsz);
+            oldnseens=nseens;
+        }
     }
-    sbt[0].sbsz = ed_b - st_b;
-    sbt[0].sb=realloc(sbt[0].sb, (sbt[0].sbsz+1)*sizeof(char));
-    strncpy(sbt[0].sb, fslurp+st_b, sbt[0].sbsz);
 
     p=NULL;
     bp=NULL;
-    *sbasz=1;
+    *sbasz=nseens;
     sbt=realloc(sbt, (*sbasz)*sizeof(strblk_t));
     free(stcp);
     free(etcp);
@@ -168,19 +174,20 @@ strblk_t *retmat_frfile(char *fname, sandestr *sestr, int *sbasz) /* return matr
 
 int main(int argc, char **argv)
 {
-    unsigned char *name_table;
+    unsigned char *name_table=NULL;
     int namecount;
     int name_entry_size;
-    int ovector[OVECCOUNT]; /* very important, this is for the substring ... the part of the targetxt which matches the pattern */
+    // int *ovector=calloc(OVECCOUNT, sizeof(int)); /* very important, this is for the substring ... the part of the targetxt which matches the pattern */
+    int ovector[OVECCOUNT]={0};
     /* the ovec will appear to hold the start and end byte of a match, with reference to the total targetxt. The third of the triplets is the lenght
      * qhich appears to be put in there for convenience purposes */
-    int i;
+    int i, j;
 
     /* argument accounting */
     if(argc!=5) {
         printf("Error. Pls supply 4 arguments (regex, name of text file, startstringtoken and endstringtoken.\n");
         printf("Typical usage on a KML file:\n");
-        printf("./dem5 \"-*\\d+\\.\\d+,\\d+\\.\\d+,\\d+\\.\\d+\" alcabre-cuvi.kml \"LineString><coordinates>\"  \"</coordinates></LineString\"");
+        printf("./dem5 \"-*\\d+\\.\\d+,\\d+\\.\\d+,\\d+\\.\\d+\" alcabre-cuvi.kml \"LineString><coordinates>\"  \"</coordinates></LineString\"\n");
         exit(EXIT_FAILURE);
     }
 
@@ -197,180 +204,194 @@ int main(int argc, char **argv)
     //char *targetxt=retmat_frfile(argv[2], sestr, &ttsz);
 
     /* OK, now we're goign for our first pcre function call, we'll need two error variables. Pattern gets compiled into "re" here and errors can be captured */
+    pcre *re = NULL;
+    int rc;
     const char *error;
     int erroffset;
-    pcre *re = pcre_compile(
+    char *substring_start = NULL;
+    int substring_length;
+    unsigned char *tabptr=NULL;
+    int n;
+    int options;
+    int start_offset;
+
+    for(j=0;j<sbasz;++j) {
+
+        re = pcre_compile(
             pattern,              /* the pattern */
             0,                    /* default options */
             &error,               /* for error message */
             &erroffset,           /* for error offset */
             NULL);                /* use default character tables */
 
-    /* Handle error, if it occurs: compilation has failed: print the error message and exit */
-    if (re == NULL) {
-        printf("PCRE compilation failed at offset %d: %s\n", erroffset, error);
-        exit(EXIT_FAILURE);
-    }
-
-    /* If the compilation succeeded, we can go on to execute. in order to do a     *
-     * pattern match against the targetxt string. This does just ONE match. If *
-     * further matching is needed, it will be done later. the returned integer
-     reflects the amoutn of free space in the output vector because after the first three entries
-     (which are the full pattern match itself), the subgroups are all stored. */
-    int rc = pcre_exec(
-            re,                   /* the compiled pattern */
-            NULL,                 /* no extra data - we didn't study the pattern */
-            sbt[0].sb,              /* the targetxt string */
-            sbt[0].sbsz,       /* the length of the targetxt */
-            0,                    /* start at offset 0 in the targetxt */
-            0,                    /* default options */
-            ovector,              /* output vector for substring information */
-            OVECCOUNT);           /* number of elements in the output vector */
-
-    /* As usual, a call to pcre will require we look out for errors if they have occurred, This time, "no match" is treated as an error, although it's fairly valid as a result. */
-    if (rc < 0) {
-        switch(rc) {
-            case PCRE_ERROR_NOMATCH:
-                printf("No match\n"); break;
-                /* Handle other special cases if you like */
-            default: printf("Matching error %d\n", rc); break;
-        }
-        pcre_free(re);     /* With an error we should bail out gracefully, that is release memory used for the compiled pattern */
-        exit(EXIT_FAILURE);
-    }
-
-    /* Match succeded  ok we can continue */
-    printf("Match at offset %i. ", ovector[0]);
-    printf("Return val from pcre_exec was %i\n", rc);
-
-    /* We have found the first match within the targetxt string. Now that could have included substrings don't forget.
-       If the output *
-     * vector wasn't big enough, say so. Then output any substrings that were captured. */
-    /* The output vector wasn't big enough */
-    if (rc == 0) {
-        rc = OVECCOUNT/3;
-        printf("ovector only has room for %d captured substrings\n", rc - 1);
-    }
-
-    /* Show substrings stored in the output vector by number. Obviously, in a real
-       application you might want to do things other than print them. */
-    for (i = 1; i < rc; i++) { /* i=0 is the string for the full match ... but once we know there's been a full match, hardly worth the bother printing it. */
-        char *substring_start = sbt[0].sb + ovector[2*i];
-        int substring_length = ovector[2*i+1] - ovector[2*i];
-        printf("%2d: %.*s\n", i, substring_length, substring_start);
-    }
-
-    /* See if there are any named substrings, and if so, show them by name. First
-       we have to extract the count of named parentheses from the pattern. */
-    (void)pcre_fullinfo(
-            re,                   /* the compiled pattern */
-            NULL,                 /* no extra data - we didn't study the pattern */
-            PCRE_INFO_NAMECOUNT,  /* number of named substrings */
-            &namecount);          /* where to put the answer */
-
-    if (namecount <= 0)
-        printf("No named substrings\n");
-    else {
-        unsigned char *tabptr;
-        printf("Named substrings\n");
-
-        /* Before we can access the substrings, we must extract the table for
-           translating names to numbers, and the size of each entry in the table. */
-        (void)pcre_fullinfo(
-                re,                       /* the compiled pattern */
-                NULL,                     /* no extra data - we didn't study the pattern */
-                PCRE_INFO_NAMETABLE,      /* address of the table */
-                &name_table);             /* where to put the answer */
-
-        (void)pcre_fullinfo(
-                re,                       /* the compiled pattern */
-                NULL,                     /* no extra data - we didn't study the pattern */
-                PCRE_INFO_NAMEENTRYSIZE,  /* size of each entry in the table */
-                &name_entry_size);        /* where to put the answer */
-
-        /* Now we can scan the table and, for each entry, print the number, the name,
-           and the substring itself. */
-        tabptr = name_table;
-        for (i = 0; i < namecount; i++) {
-            int n = (tabptr[0] << 8) | tabptr[1];
-            printf("(%d) %*s: %.*s\n", n, name_entry_size - 3, tabptr + 2,
-                    ovector[2*n+1] - ovector[2*n], sbt[0].sb + ovector[2*n]);
-            tabptr += name_entry_size;
-        }
-    }
-
-    /* OK, first match exploration undertaken, next we look for subsequent matches: we use and infinite loop */
-    for (;;) { /* Infinite loop for second and subsequent matches */
-        int options = 0;                 /* Normally no options */
-        int start_offset = ovector[1];   /* Start at end of previous match */
-
-        /* If the previous match was for an empty string, we are finished if we are
-           at the end of the targetxt. Otherwise, arrange to run another match at the
-           same point to see if a non-empty match can be found. */
-
-        if (ovector[0] == ovector[1]) {
-            if (ovector[0] == sbt[0].sbsz)
-                break;
-            //            options = PCRE_NOTEMPTY_ATSTART | PCRE_ANCHORED;
-            options = PCRE_NOTEMPTY | PCRE_ANCHORED;
+        /* Handle error, if it occurs: compilation has failed: print the error message and exit */
+        if (re == NULL) {
+            printf("PCRE compilation failed at offset %d: %s\n", erroffset, error);
+            exit(EXIT_FAILURE);
         }
 
-        /* Run the next matching operation */
+        /* If the compilation succeeded, we can go on to execute. in order to do a     *
+         * pattern match against the targetxt string. This does just ONE match. If *
+         * further matching is needed, it will be done later. the returned integer
+         reflects the amount of free space in the output vector because after the first three entries
+         (which are the full pattern match itself), the subgroups are all stored. */
         rc = pcre_exec(
                 re,                   /* the compiled pattern */
                 NULL,                 /* no extra data - we didn't study the pattern */
-                sbt[0].sb,              /* the targetxt string */
-                sbt[0].sbsz,       /* the length of the targetxt */
-                start_offset,         /* starting offset in the targetxt */
-                options,              /* options */
+                sbt[j].sb,              /* the targetxt string */
+                sbt[j].sbsz,       /* the length of the targetxt */
+                0,                    /* start at offset 0 in the targetxt */
+                0,                    /* default options */
                 ovector,              /* output vector for substring information */
                 OVECCOUNT);           /* number of elements in the output vector */
 
-        if (rc == PCRE_ERROR_NOMATCH) { /* all possible matches found */
-            if (options == 0)
-                break;
-            ovector[1] = start_offset + 1;
-            continue;    /* Go round the loop again */
-        }
-
-        /* Other matching errors are not recoverable. */
+        /* As usual, a call to pcre will require we look out for errors if they have occurred, This time, "no match" is treated as an error, although it's fairly valid as a result. */
         if (rc < 0) {
-            printf("Matching error %d\n", rc);
-            pcre_free(re);    /* Release memory used for the compiled pattern */
-            return 1;
+            switch(rc) {
+                case PCRE_ERROR_NOMATCH:
+                    printf("No match\n"); break;
+                /* Handle other special cases if you like */
+                default: printf("Matching error %d\n", rc); break;
+            }
+            pcre_free(re);     /* With an error we should bail out gracefully, that is release memory used for the compiled pattern */
+            exit(EXIT_FAILURE);
         }
 
-        /* Match succeded */
-        printf("Match at offset %d: ", ovector[0]);
+        /* Match succeded  ok we can continue */
+        printf("Match at offset %i. ", ovector[0]);
+        printf("Return val from pcre_exec was %i\n", rc);
 
-        /* The match succeeded, but the output vector wasn't big enough. */
+        /* We have found the first match within the targetxt string. Now that could have included substrings don't forget.
+           If the output *
+         * vector wasn't big enough, say so. Then output any substrings that were captured. */
+        /* The output vector wasn't big enough */
         if (rc == 0) {
             rc = OVECCOUNT/3;
             printf("ovector only has room for %d captured substrings\n", rc - 1);
         }
 
-        /* As before, show substrings stored in the output vector by number, and then
-           also any named substrings. */
-        for (i = 0; i < rc; i++) {
-            char *substring_start = sbt[0].sb + ovector[2*i];
-            int substring_length = ovector[2*i+1] - ovector[2*i];
-            printf("%.*s\n", substring_length, substring_start);
+        /* Show substrings stored in the output vector by number. Obviously, in a real
+           application you might want to do things other than print them. */
+        for (i = 1; i < rc; i++) { /* i=0 is the string for the full match ... but once we know there's been a full match, hardly worth the bother printing it. */
+            substring_start = sbt[j].sb + ovector[2*i];
+            substring_length = ovector[2*i+1] - ovector[2*i];
+            printf("%2d: %.*s\n", i, substring_length, substring_start);
         }
 
-        if (namecount > 0) {
-            unsigned char *tabptr = name_table;
+        /* See if there are any named substrings, and if so, show them by name. First
+       we have to extract the count of named parentheses from the pattern. */
+        (void)pcre_fullinfo(
+            re,                   /* the compiled pattern */
+            NULL,                 /* no extra data - we didn't study the pattern */
+            PCRE_INFO_NAMECOUNT,  /* number of named substrings */
+            &namecount);          /* where to put the answer */
+
+        if (namecount <= 0)
+            printf("No named substrings\n");
+        else {
             printf("Named substrings\n");
+
+            /* Before we can access the substrings, we must extract the table for
+               translating names to numbers, and the size of each entry in the table. */
+            (void)pcre_fullinfo(
+                    re,                       /* the compiled pattern */
+                    NULL,                     /* no extra data - we didn't study the pattern */
+                    PCRE_INFO_NAMETABLE,      /* address of the table */
+                    &name_table);             /* where to put the answer */
+
+            (void)pcre_fullinfo(
+                    re,                       /* the compiled pattern */
+                    NULL,                     /* no extra data - we didn't study the pattern */
+                    PCRE_INFO_NAMEENTRYSIZE,  /* size of each entry in the table */
+                    &name_entry_size);        /* where to put the answer */
+
+            /* Now we can scan the table and, for each entry, print the number, the name, and the substring itself. */
+            tabptr = name_table;
             for (i = 0; i < namecount; i++) {
-                int n = (tabptr[0] << 8) | tabptr[1];
-                printf("(%d) %*s: %.*s\n", n, name_entry_size - 3, tabptr + 2, ovector[2*n+1] - ovector[2*n], sbt[0].sb + ovector[2*n]);
+                n = (tabptr[0] << 8) | tabptr[1];
+                printf("(%d) %*s: %.*s\n", n, name_entry_size - 3, tabptr + 2, ovector[2*n+1] - ovector[2*n], sbt[j].sb + ovector[2*n]);
                 tabptr += name_entry_size;
             }
         }
-    } /* End of loop to find second and subsequent matches */
 
-    pcre_free(re); /* Release memory used for the compiled pattern */
+        /* OK, first match exploration undertaken, next we look for subsequent matches: we use and infinite loop */
+        for (;;) { /* Infinite loop for second and subsequent matches */
+            options = 0;                 /* Normally no options */
+            start_offset = ovector[1];   /* Start at end of previous match */
+
+            /* If the previous match was for an empty string, we are finished if we are
+               at the end of the targetxt. Otherwise, arrange to run another match at the
+               same point to see if a non-empty match can be found. */
+
+            if (ovector[0] == ovector[1]) {
+                if (ovector[0] == sbt[j].sbsz)
+                    break;
+                //            options = PCRE_NOTEMPTY_ATSTART | PCRE_ANCHORED;
+                options = PCRE_NOTEMPTY | PCRE_ANCHORED;
+            }
+
+            /* Run the next matching operation */
+            rc = pcre_exec(
+                    re,                   /* the compiled pattern */
+                    NULL,                 /* no extra data - we didn't study the pattern */
+                    sbt[j].sb,              /* the targetxt string */
+                    sbt[j].sbsz,       /* the length of the targetxt */
+                    start_offset,         /* starting offset in the targetxt */
+                    options,              /* options */
+                    ovector,              /* output vector for substring information */
+                    OVECCOUNT);           /* number of elements in the output vector */
+
+            if (rc == PCRE_ERROR_NOMATCH) { /* all possible matches found */
+                if (options == 0)
+                    break;
+                ovector[1] = start_offset + 1;
+                continue;    /* Go round the loop again */
+            }
+
+            /* Other matching errors are not recoverable. */
+            if (rc < 0) {
+                printf("Matching error %d\n", rc);
+                pcre_free(re);    /* Release memory used for the compiled pattern */
+                return 1;
+            }
+
+            /* Match succeded */
+            printf("Match at offset %d: ", ovector[0]);
+
+            /* The match succeeded, but the output vector wasn't big enough. */
+            if (rc == 0) {
+                rc = OVECCOUNT/3;
+                printf("ovector only has room for %d captured substrings\n", rc - 1);
+            }
+
+            /* As before, show substrings stored in the output vector by number, and then
+               also any named substrings. */
+            for (i = 0; i < rc; i++) {
+                substring_start = sbt[j].sb + ovector[2*i];
+                substring_length = ovector[2*i+1] - ovector[2*i];
+                printf("%.*s\n", substring_length, substring_start);
+            }
+
+            if (namecount > 0) {
+                tabptr = name_table;
+                printf("Named substrings\n");
+                for (i = 0; i < namecount; i++) {
+                    n = (tabptr[0] << 8) | tabptr[1];
+                    printf("(%d) %*s: %.*s\n", n, name_entry_size - 3, tabptr + 2, ovector[2*n+1] - ovector[2*n], sbt[j].sb + ovector[2*n]);
+                    tabptr += name_entry_size;
+                }
+            }
+        } /* End of loop to find second and subsequent matches */
+        /* reset all the regex stuff */
+        pcre_free(re);
+        //memset(ovector,0,OVECCOUNT*sizeof(int));
+        ovector[OVECCOUNT]={0};
+        tabptr=NULL;
+    } /* end of loop for the different strblks */
+
+    /* OK, closing down ... free up everything */
     for(i=0;i<sbasz;++i) 
-        free(sbt[0].sb);
+        free(sbt[i].sb);
     free(sbt);
     free(sestr->ss);
     free(sestr->es);
