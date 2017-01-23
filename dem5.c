@@ -6,6 +6,10 @@ working with
 ./dem5 "-*\d+\.\d+,\d+\.\d+,\d+\.\d+" alcabre-cuvi.kml "LineString><coordinates>"  "</coordinates></LineString"
 on the kml file
 
+
+By way of explanation: pcre.
+ovector holds a single match, followed by the subgroups (denoted by parentheses) within the selfsame match
+Both the full match and its subgroups required three numbers: start, end and length.
 */
 #include <stdio.h>
 #include <string.h>
@@ -21,6 +25,12 @@ on the kml file
         (b) += (c); \
         (a)=realloc((a), (b)*sizeof(t)); \
     }
+
+typedef struct /* gpx_t */
+{
+    float c[3]; // lat, lon, ele;
+    int dt[6]; // yr, mon, day, hr, min, sec;
+} gpx_t;
 
 typedef struct /* sandestr: start and end string, this delimits and interior section of the file */
 {
@@ -148,6 +158,7 @@ strblk_t *retmat_frfile(char *fname, sandestr *sestr, int *sbasz) /* return matr
                 ed_b=(size_t)(bp - fslurp); // double verified
                 seenss=0;
                 nseens++; /*Ok, we have just been though one block */
+                // break; // I leave this here because it was there originally and caused quite a headache
             } else
                 continue;
         }
@@ -192,7 +203,20 @@ int main(int argc, char **argv)
         printf("Error. Pls supply 4 arguments (regex, name of text file, startstringtoken and endstringtoken.\n");
         printf("Typical usage on a KML file:\n");
         printf("./dem5 \"-*\\d+\\.\\d+,\\d+\\.\\d+,\\d+\\.\\d+\" alcabre-cuvi.kml \"LineString><coordinates>\"  \"</coordinates></LineString\"\n");
+        //or
+//        ./dem5_d 'lat="(-*\d+\.\d+)" lon="(-*\d+\.\d+)">\n\ +<ele>(\d+.\d+)</ele>\n\ +<time>(\d+)-(\d+)-(\d+)T(\d+):(\d+):(\d+)Z' ill.gpx "<trkseg>"  "</trkseg"
+//        //for gpx
         exit(EXIT_FAILURE);
+    }
+
+    gpx_t *dholder=NULL;
+    int dhbuf=BUF;
+    unsigned char GPXYES=0;
+    char *tstr=strrchr(argv[2], '.');
+    if(!strcmp(tstr+1, "gpx")) {
+            GPXYES=1;
+            dholder=calloc(dhbuf, sizeof(gpx_t));
+            // this is the famed derivative use of void pointer ... here is automaticaly gets assigned to gpx_t type!
     }
 
     char *pattern = argv[1]; /* OK, here is our pattern */
@@ -219,6 +243,8 @@ int main(int argc, char **argv)
     int n;
     int options;
     int start_offset;
+    int nmatches=0;
+    char tmpstr[128]={0};
 
 
     re = pcre_compile(
@@ -268,6 +294,9 @@ int main(int argc, char **argv)
         /* Match succeded  ok we can continue */
         printf("Match at offset %i. ", ovector[0]);
         printf("Return val from pcre_exec was %i\n", rc);
+        nmatches++;
+        if(GPXYES)
+            CONDREALLOC(nmatches, dhbuf, BUF, dholder, gpx_t);
 
         /* We have found the first match within the targetxt string. Now that could have included substrings don't forget.
            If the output *
@@ -284,6 +313,15 @@ int main(int argc, char **argv)
             substring_start = sbt[j].sb + ovector[2*i];
             substring_length = ovector[2*i+1] - ovector[2*i];
             printf("%2d: %.*s\n", i, substring_length, substring_start);
+            sprintf(tmpstr, "%.*s", substring_length, substring_start);
+            if(GPXYES) {
+                if(i<4)
+                    dholder[nmatches-1].c[i-1]=atof(tmpstr);
+                else if ((i>=4) &(i<10))
+                    dholder[nmatches-1].dt[i-3-1]=atoi(tmpstr);
+                else
+                    printf("Shouldn't be getting more than 9 subgroup matches\n"); 
+            }
         }
 
         /* See if there are any named substrings, and if so, show them by name. First
@@ -364,7 +402,10 @@ int main(int argc, char **argv)
             }
 
             /* Match succeded */
-            printf("Match at offset %d: ", ovector[0]);
+            printf("Match at offset %d; groups= ", ovector[0]);
+            nmatches++;
+            if(GPXYES)
+                CONDREALLOC(nmatches, dhbuf, BUF, dholder, gpx_t);
 
             /* The match succeeded, but the output vector wasn't big enough. */
             if (rc == 0) {
@@ -374,11 +415,21 @@ int main(int argc, char **argv)
 
             /* As before, show substrings stored in the output vector by number, and then
                also any named substrings. */
-            for (i = 0; i < rc; i++) {
+            for (i = 1; i < rc; i++) { // avoid first three entries because these are the whole match
                 substring_start = sbt[j].sb + ovector[2*i];
                 substring_length = ovector[2*i+1] - ovector[2*i];
-                printf("%.*s\n", substring_length, substring_start);
+                printf("%d) %.*s ", i, substring_length, substring_start);
+                sprintf(tmpstr, "%.*s", substring_length, substring_start);
+                if(GPXYES) {
+                    if(i<4)
+                        dholder[nmatches-1].c[i-1]=atof(tmpstr);
+                    else if ((i>=4) &(i<10))
+                        dholder[nmatches-1].dt[i-3-1]=atoi(tmpstr);
+                    else
+                        printf("Shouldn't be getting more than 9 subgroup matches\n"); 
+                }
             }
+            printf("\n"); 
 
             if (namecount > 0) {
                 tabptr = name_table;
@@ -393,12 +444,24 @@ int main(int argc, char **argv)
         /* reset all the regex stuff */
         memset(ovector,0,OVECCOUNT*sizeof(int));
         tabptr=NULL;
+        printf("Nummatches=%d\n", nmatches); 
+        if(GPXYES) {
+            for(i=0;i<nmatches;++i) {
+                for(j=0;j<3;++j) 
+                    printf("%4.6f ", dholder[i].c[j]); 
+                for(j=3;j<9;++j) 
+                    printf("%d ", dholder[i].dt[j-3]); 
+                printf("\n"); 
+            }
+        }
     } /* end of loop for the different strblks */
     pcre_free(re);
 
     /* OK, closing down ... free up everything */
     for(i=0;i<sbasz;++i) 
         free(sbt[i].sb);
+    if(GPXYES)
+        free(dholder);
     free(sbt);
     free(sestr->ss);
     free(sestr->es);
