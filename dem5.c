@@ -33,7 +33,7 @@ typedef struct /* sandestr: start and end string, this delimits and interior sec
 typedef struct /* strblk_t: str blk type */
 {
     char *sb; /* string block */
-    size_t sbsz; /* start string sz*/
+    int sbsz; /* start string sz*/
 } strblk_t; /* start and end strng struct */
 
 size_t fszfind(FILE *fp)
@@ -148,15 +148,19 @@ strblk_t *retmat_frfile(char *fname, sandestr *sestr, int *sbasz) /* return matr
                 ed_b=(size_t)(bp - fslurp); // double verified
                 seenss=0;
                 nseens++; /*Ok, we have just been though one block */
-                break;
             } else
                 continue;
         }
         if(nseens != oldnseens) {
             CONDREALLOC(nseens, sbbuf, BUF, sbt, strblk_t);
-            sbt[nseens].sbsz = ed_b - st_b;
-            sbt[nseens].sb=realloc(sbt[nseens].sb, (sbt[nseens].sbsz+1)*sizeof(char));
-            strncpy(sbt[nseens].sb, fslurp+st_b, sbt[nseens].sbsz);
+            sbt[nseens-1].sbsz = ed_b - st_b;
+            sbt[nseens-1].sb=realloc(sbt[nseens-1].sb, (sbt[nseens-1].sbsz+1)*sizeof(char));
+            strncpy(sbt[nseens-1].sb, fslurp+st_b, sbt[nseens-1].sbsz);
+            sbt[nseens-1].sb[sbt[nseens-1].sbsz]='\0';
+#if defined DBG
+            printf("Found blocksz=%d\n", sbt[nseens-1].sbsz);
+            // printf("%s\n", sbt[nseens-1].sb);
+#endif
             oldnseens=nseens;
         }
     }
@@ -196,11 +200,12 @@ int main(int argc, char **argv)
     sandestr *sestr=malloc(sizeof(sandestr)); /* declare start-end-string struct */
     sestr->ss=scas(argv[3], &(sestr->ssz)); /* use the scas function to properly represent newliens and get the two string sizes. */
     sestr->es=scas(argv[4], &(sestr->esz));
-#if defined DBG
-    printf("Interpreted sizes, startstr: %d, endstr: %d\n", sestr->ssz, sestr->esz); 
-#endif
     int sbasz=0; /// str block array size
     strblk_t *sbt=retmat_frfile(argv[2], sestr, &sbasz);
+#if defined DBG
+    printf("Interpreted sizes, startstr: %d, endstr: %d\n", sestr->ssz, sestr->esz); 
+    printf("Numblocks=%d\n", sbasz);
+#endif
     //char *targetxt=retmat_frfile(argv[2], sestr, &ttsz);
 
     /* OK, now we're goign for our first pcre function call, we'll need two error variables. Pattern gets compiled into "re" here and errors can be captured */
@@ -215,26 +220,29 @@ int main(int argc, char **argv)
     int options;
     int start_offset;
 
+
+    re = pcre_compile(
+        pattern,              /* the pattern */
+        0,                    /* default options */
+        &error,               /* for error message */
+        &erroffset,           /* for error offset */
+        NULL);                /* use default character tables */
+
+    /* Handle error, if it occurs: compilation has failed: print the error message and exit */
+    if (re == NULL) {
+        printf("PCRE compilation failed at offset %d: %s\n", erroffset, error);
+        exit(EXIT_FAILURE);
+    }
+
     for(j=0;j<sbasz;++j) {
-
-        re = pcre_compile(
-            pattern,              /* the pattern */
-            0,                    /* default options */
-            &error,               /* for error message */
-            &erroffset,           /* for error offset */
-            NULL);                /* use default character tables */
-
-        /* Handle error, if it occurs: compilation has failed: print the error message and exit */
-        if (re == NULL) {
-            printf("PCRE compilation failed at offset %d: %s\n", erroffset, error);
-            exit(EXIT_FAILURE);
-        }
-
         /* If the compilation succeeded, we can go on to execute. in order to do a     *
          * pattern match against the targetxt string. This does just ONE match. If *
          * further matching is needed, it will be done later. the returned integer
          reflects the amount of free space in the output vector because after the first three entries
          (which are the full pattern match itself), the subgroups are all stored. */
+#if defined DBG
+        // printf("%s\n", sbt[j].sb);
+#endif
         rc = pcre_exec(
                 re,                   /* the compiled pattern */
                 NULL,                 /* no extra data - we didn't study the pattern */
@@ -383,11 +391,10 @@ int main(int argc, char **argv)
             }
         } /* End of loop to find second and subsequent matches */
         /* reset all the regex stuff */
-        pcre_free(re);
-        //memset(ovector,0,OVECCOUNT*sizeof(int));
-        ovector[OVECCOUNT]={0};
+        memset(ovector,0,OVECCOUNT*sizeof(int));
         tabptr=NULL;
     } /* end of loop for the different strblks */
+    pcre_free(re);
 
     /* OK, closing down ... free up everything */
     for(i=0;i<sbasz;++i) 
