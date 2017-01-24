@@ -228,7 +228,7 @@ int main(int argc, char **argv)
     if(!strcmp(tstr+1, "gpx"))
         GPXYES=1;
 
-    gpx_t **dholder;
+    gpx_t **dholder=malloc(sbasz*sizeof(gpx_t*));
     int dhbuf=BUF;
     for(i=0;i<sbasz;++i) 
         if(GPXYES)
@@ -322,9 +322,9 @@ int main(int argc, char **argv)
             sprintf(tmpstr, "%.*s", substring_length, substring_start);
             if(GPXYES) {
                 if(i<4)
-                    dholder[nmatches-1].c[i-1]=atof(tmpstr);
+                    dholder[j][nmatches-1].c[i-1]=atof(tmpstr);
                 else if ((i>=4) &(i<10))
-                    dholder[nmatches-1].dt[i-3-1]=atoi(tmpstr);
+                    dholder[j][nmatches-1].dt[i-3-1]=atoi(tmpstr);
                 else
                     printf("Shouldn't be getting more than 9 subgroup matches\n"); 
             }
@@ -454,9 +454,9 @@ int main(int argc, char **argv)
         if(GPXYES) {
             for(i=0;i<nmatches;++i) {
                 for(j=0;j<3;++j) 
-                    printf("%4.6f ", dholder[i].c[j]); 
+                    printf("%4.6f ", dholder[jj][i].c[j]); 
                 for(j=3;j<9;++j) 
-                    printf("%d ", dholder[i].dt[j-3]); 
+                    printf("%d ", dholder[jj][i].dt[j-3]); 
                 printf("\n"); 
             }
         }
@@ -467,7 +467,9 @@ int main(int argc, char **argv)
     for(i=0;i<sbasz;++i) 
         free(sbt[i].sb);
     if(GPXYES)
-        free(dholder);
+        for(i=0;i<sbasz;++i) 
+            free(dholder[i]);
+    free(dholder);
     free(sbt);
     free(sestr->ss);
     free(sestr->es);
