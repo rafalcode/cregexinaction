@@ -2,7 +2,7 @@ CC=gcc
 CFLAGS=-O3
 DCFLAGS=-g -Wall -DDBG
 SPECLIBS=-lpcre
-EXECUTABLES=pcredemo dem2 dem3 dem4 dem5 dem5_d dem6 dem7 pcregrep nx2phy_cheap dem5a dem4a gen0
+EXECUTABLES=pcredemo dem2 dem3 dem4 dem5 dem5_d dem6 dem7 pcregrep nx2phy_cheap dem5a dem4a gen0 simpd
 
 # mm1, an xercise in memory maps ... sys/ctypes-h need to be in place.
 mm1: mm1.c
@@ -28,6 +28,11 @@ dem5: dem5.c
 dem5_d: dem5.c
 	${CC} ${DCFLAGS} -o $@ $^ ${SPECLIBS}
 
+# dem5 waht regex's work? Look at a GPX:
+# ./dem5 'lon="-*\d+\.\d+">\n\ +<ele>\d+.\d+' ill.gpx "<trkseg>"  "</trkseg"
+# note how this will capture a newline and starting spaces
+
+
 # based on dem5, though this is more customised for the Nexusfile extraction, but either it doesn't workor is not very robust.
 dem6: dem6.c
 	${CC} ${CFLAGS} -o $@ $^ ${SPECLIBS}
@@ -40,16 +45,13 @@ dem7: dem7.c
 nx2phy_cheap: nx2phy_cheap.c
 	${CC} ${CFLAGS} -DDEBUG -o $@ $^ ${SPECLIBS}
 
-gen0: gen0.c
-	${CC} ${CFLAGS} -DDEBUG -o $@ $^ ${SPECLIBS}
-
 pcregrep: pcregrep.c
 	${CC} ${CFLAGS} -o $@ $^ ${SPECLIBS}
 
 
-#dem4a, copied from dem4 ... _does not_ incorporate btwntxt routines.
-dem4a: dem4a.c
-	${CC} ${CFLAGS} -o $@ $^ ${SPECLIBS}
+# simpd, copied from dem4a ... _does not_ incorporate btwntxt routines.
+simpd: simpd.c
+	${CC} ${DCFLAGS} -o $@ $^ ${SPECLIBS}
 
 #dem5a, copied from dem5 ... incorporates btwntxt routines.
 # Sample cmdline: ./dem5a "\[\d+\]" aio1.nex "\nMATRIX\n" "\n;\n"
