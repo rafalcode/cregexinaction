@@ -77,17 +77,17 @@ typedef struct /* ou_t unique occurence vector: often uov */
 
 size_t fszfind(FILE *fp)
 {
-    fseek(fp, 0, SEEK_END);
-    size_t fbytsz = (size_t)ftell(fp);
-    rewind(fp);
-    return fbytsz;
+	fseek(fp, 0, SEEK_END);
+	size_t fbytsz = (size_t)ftell(fp);
+	rewind(fp);
+	return fbytsz;
 }
 
 void printcint(void *arg, int integer) /* void ... to allow generic ... our print-in-colour function */
 {
-       char *fmt;
-       fmt = (char *)arg; /* arg is cast to charptr */
-       printf (fmt, integer);
+	char *fmt;
+	fmt = (char *)arg; /* arg is cast to charptr */
+	printf (fmt, integer);
 }
 
 void prtuo(uo_t *uov)
@@ -389,210 +389,179 @@ i_s *procfastaf(char *fname, unsigned *nsq)
 
 int main(int argc, char **argv)
 {
-    char find_all; /* boolean to see if -g option is called or not */
-    int namecount;
+	char find_all; /* boolean to see if -g option is called or not */
 	int lastovecel;
-    int ovec[OVECCOUNT]; /* very important, this is for the substring ... the part of the targetxt which matches the pattern */
-    /* the ovec will appear to hold the start and end byte of a match, with reference to the total targetxt. The third of the triplets is the lenght
-     * qhich appears to be put in there for convenience purposes */
-    int ttxtlen;
-    int i;
+	int ovec[OVECCOUNT]; /* very important, this is for the substring ... the part of the targetxt which matches the pattern */
+	/* the ovec will appear to hold the start and end byte of a match, with reference to the total targetxt. The third of the triplets is the lenght
+	 * qhich appears to be put in there for convenience purposes */
+	int ttxtlen;
+	int i, k;
 
 	/* by default, find all matches by default (originally a -g option) */
-    find_all = 1;
+	find_all = 1;
 
-    /* After the options, we require exactly two arguments, which are the pattern, and the targetxt string. */
-    if (argc != 3) {
-        printf("Two arguments required: a regex and a fasta file name: for now only first sequence will be analysed.\n");
-        exit(EXIT_FAILURE);
-    }
-
-    char *pattern = argv[1]; /* OK, here is our pattern */
-	unsigned numsq;
-    i_s *sqisz=procfastaf(argv[2], &numsq); /* and here is our target text:sqisz[0].sq is the first sequence */
-    char *targetxt = sqisz[0].sq;
-    ttxtlen = sqisz[0].sylen;
-
-    /* OK, now we're going for our first pcre function call, we'll need twwo error variables. Pattern gets compiled into "re" here and errors can be captured */
-    const char *error;
-    int erroffset;
-    pcre *re = pcre_compile(
-            pattern,              /* the pattern */
-            0,                    /* default options */
-            &error,               /* for error message */
-            &erroffset,           /* for error offset */
-            NULL);                /* use default character tables */
-
-    /* Handle error, if it occurs: compilation has failed: print the error message and exit */
-    if (re == NULL) {
-        printf("PCRE compilation failed at offset %d: %s\n", erroffset, error);
-        exit(EXIT_FAILURE);
-    }
-
-    /* If the compilation succeeded, we can go on to execute. in order to do a     *
-     * pattern match against the targetxt string. This does just ONE match. If *
-     * further matching is needed, it will be done later. the returned integer
-	reflects the amoutn of free space in the output vector because after the first three entries
- (which are the full pattern match itself), the subgroups are all stored. */
-    int rc = pcre_exec(
-            re,                   /* the compiled pattern */
-            NULL,                 /* no extra data - we didn't study the pattern */
-            targetxt,              /* the targetxt string */
-            ttxtlen,       /* the length of the targetxt */
-            0,                    /* start at offset 0 in the targetxt */
-            0,                    /* default options */
-            ovec,              /* output vector for substring information */
-            OVECCOUNT);           /* number of elements in the output vector */
-
-    /* As usual, a call to pcre will require we look out for errors if they have occurred, This time, "no match" is treated as an error, although it's fairly valid as a result. */
-    if (rc < 0) {
-        switch(rc) {
-            case PCRE_ERROR_NOMATCH:
-                printf("No match\n"); break;
-            /* Handle other special cases if you like */
-            default: printf("Matching error %d\n", rc); break;
-        }
-        pcre_free(re);     /* With an error we should bail out gracefully, that is release memory used for the compiled pattern */
-		printf("There were no strings matching this pattern. Bailing out.\n"); 
-        exit(EXIT_FAILURE);
-    }
-
-    /* First match succeded: print out */
-    printf("There was at least one overall match for this pattern (second and later matches will be in alternate colours):\n");
-    printf("%.*s", ovec[0], targetxt);
-    // printcint("\033[35m%.*s\033[0m", ovec[1]-ovec[0], targetxt+ovec[0]);
-    printf("\033[32m%.*s\033[0m", ovec[1]-ovec[0], targetxt+ovec[0]);
-	lastovecel=ovec[1];
-
-    /* The output vector wasn't big enough */
-    if (rc == 0) {
-        rc = OVECCOUNT/3;
-        printf("ovec only has room for %d captured substrings\n", rc - 1);
-    }
-
-    /* Show substrings stored in the output vector by number. Obviously, in a real
-       application you might want to do things other than print them. */
-	unsigned char oddyes;
-    for (i = 1; i < rc; i++) { /* i=0 is the string for the full match ... but once we know there's been a full match, hardly worth the bother printing it. */
-		oddyes=i%2;
-		printf("%.*s", ovec[2*i], targetxt);
-        printf((oddyes)?"\033[36m%.*s\033[0m":"\033[33m%.*s\033[0m", ovec[2*i+1] - ovec[2*i], targetxt + ovec[2*i]);
-        // printf((oddyes)?"ANMAG%.*sANRST":"ANYEL%.*sANRST", ovec[2*i+1] - ovec[2*i], targetxt + ovec[2*i]);
-    }
-	if(rc>1) { /* end part of string */
-		i--;
-   		printf("%s\n", targetxt+ovec[2*i+1]);
+	/* After the options, we require exactly two arguments, which are the pattern, and the targetxt string. */
+	if (argc != 3) {
+		printf("Two arguments required: a regex and a fasta file name: for now only first sequence will be analysed.\n");
+		exit(EXIT_FAILURE);
 	}
 
-    /**************************************************************************
-     * That concludes the basic part of this demonstration program. We have    *
-     * compiled a pattern, and performed a single match. The code that follows *
-     * shows first how to access named substrings, and then how to code for    *
-     * repeated matches on the same targetxt.                                   *
-     **************************************************************************/
+	char *pattern = argv[1]; /* OK, here is our pattern */
+	unsigned numsq;
+	i_s *sqisz=procfastaf(argv[2], &numsq); /* and here is our target text:sqisz[0].sq is the first sequence */
+	char *targetxt;
+	pcre *re;
+	/* OK, now we're going to compile the pattern and capture errors if they ensue */
+	const char *error;
+	int erroffset;
+	re = pcre_compile(pattern, 0 /* default options */, &error, &erroffset /* for error offset */, NULL /* use default character tables */);
+	int rc;
+	unsigned char oddyes;
+	if (re == NULL) { /* Handle error, if it occurs: compilation has failed: print the error message and exit */
+		printf("PCRE compilation failed at offset %d: %s\n", erroffset, error);
+		exit(EXIT_FAILURE);
+	}
 
-    /* See if there are any named substrings, and if so, show them by name. First
-       we have to extract the count of named parentheses from the pattern. */
-    (void)pcre_fullinfo(
-            re,                   /* the compiled pattern */
-            NULL,                 /* no extra data - we didn't study the pattern */
-            PCRE_INFO_NAMECOUNT,  /* number of named substrings */
-            &namecount);          /* where to put the answer */
+	for(k=0;k<numsq;++k) {
+		targetxt = sqisz[k].sq;
+		ttxtlen = sqisz[k].sylen;
 
-    if (namecount > 0)
-		printf("No named substrings in this particular program, sorry\n"); 
 
-    if (!find_all) {
-        pcre_free(re);   /* Release the memory used for the compiled pattern */
-        return 0;        /* Finish unless -g was given */
-    }
+		rc = pcre_exec(re, NULL /* no extra data - we didn't study the pattern */, targetxt, ttxtlen, 0 /* start at offset 0 in the targetxt */, 0 /* default options */, ovec /* output vector for substring information */, OVECCOUNT /* number of elements in the output vector */);
 
-    /* now search for all subsequent matches */
-	int latermatches=0;
-    int options, start_offset;
-    for (;;) { /* Infinite loop for second and subsequent matches */
-        options = 0;                 /* Normally no options */
-        start_offset = ovec[1];   /* Start at end of previous match */
+		/* As usual, a call to pcre will require we look out for errors if they have occurred, This time, "no match" is treated as an error, although it's fairly valid as a result. */
+		if (rc < 0) {
+			switch(rc) {
+				case PCRE_ERROR_NOMATCH:
+					printf("No match\n"); break;
+					/* Handle other special cases if you like */
+				default: printf("Matching error %d\n", rc); break;
+			}
+			pcre_free(re);     /* With an error we should bail out gracefully, that is release memory used for the compiled pattern */
+			printf("There were no strings matching this pattern. Bailing out.\n"); 
+			exit(EXIT_FAILURE);
+		}
 
-        /* If the previous match was for an empty string, we are finished if we are
-           at the end of the targetxt. Otherwise, arrange to run another match at the
-           same point to see if a non-empty match can be found. */
-
-        if (ovec[0] == ovec[1]) {
-            if (ovec[0] == ttxtlen) break;
-//            options = PCRE_NOTEMPTY_ATSTART | PCRE_ANCHORED;
-            options = PCRE_NOTEMPTY | PCRE_ANCHORED;
-        }
-
-        /* Run the next matching operation */
-        rc = pcre_exec(re/* the compiled pattern */, NULL /* no extra studied data */, targetxt, ttxtlen, start_offset, options, ovec, /* output vector for substring information */ OVECCOUNT); /* number of elements in the output vector */
-
-        /* This time, a result of NOMATCH isn't an error. If the value in "options"
-           is zero, it just means we have found all possible matches, so the loop ends.
-           Otherwise, it means we have failed to find a non-empty-string match at a
-           point where there was a previous empty-string match. In this case, we do what
-           Perl does: advance the matching position by one, and continue. We do this by
-           setting the "end of previous match" offset, because that is picked up at the
-           top of the loop as the point at which to start again. */
-        if (rc == PCRE_ERROR_NOMATCH) {
-            if (options == 0)
-                break;
-            ovec[1] = start_offset + 1;
-            continue;    /* Go round the loop again */
-        }
-
-        /* Other matching errors are not recoverable. */
-        if (rc < 0) {
-            printf("Matching error %d\n", rc);
-            pcre_free(re);    /* Release memory used for the compiled pattern */
-            return 1;
-        }
-
-        /* Match succeded */
-		latermatches++;
-		// printf("Yes, there was another match for this pattern:\n");
-    	// printf("%.*s", ovec[0], targetxt);
-		printf("%.*s", ovec[0]-lastovecel, targetxt+lastovecel);
-		oddyes=latermatches%2;
-        printf((oddyes)?"\033[36m%.*s\033[0m":"\033[32m%.*s\033[0m", ovec[1]-ovec[0], targetxt+ovec[0]);
+		/* First match succeded: print out */
+		printf("There was at least one overall match for this pattern (second and later matches will be in alternate colours):\n");
+		printf("%.*s", ovec[0], targetxt);
+		// printcint("\033[35m%.*s\033[0m", ovec[1]-ovec[0], targetxt+ovec[0]);
+		printf("\033[32m%.*s\033[0m", ovec[1]-ovec[0], targetxt+ovec[0]);
 		lastovecel=ovec[1];
 
+		/* The output vector wasn't big enough */
+		if (rc == 0)
+			printf("ovec only has room for %d captured substrings\n", OVECCOUNT/3 - 1);
 
-        /* The match succeeded, but the output vector wasn't big enough. */
-        if (rc == 0) {
-            rc = OVECCOUNT/3;
-            printf("ovec only has room for %d captured substrings\n", rc - 1);
-        }
-
-        /* As before, show substrings stored in the output vector by number, and then
-           also any named substrings. */
-        for (i = 1; i < rc; i++) {
+		/* Show substrings stored in the output vector by number. Obviously, in a real
+		   application you might want to do things other than print them. */
+		for (i = 1; i < rc; i++) { /* i=0 is the string for the full match ... but once we know there's been a full match, hardly worth the bother printing it. */
 			oddyes=i%2;
 			printf("%.*s", ovec[2*i], targetxt);
-        	printf((oddyes)?"\033[36m%.*s\033[0m":"\033[32m%.*s\033[0m", ovec[2*i+1] - ovec[2*i], targetxt + ovec[2*i]);
+			printf((oddyes)?"\033[36m%.*s\033[0m":"\033[33m%.*s\033[0m", ovec[2*i+1] - ovec[2*i], targetxt + ovec[2*i]);
+			// printf((oddyes)?"ANMAG%.*sANRST":"ANYEL%.*sANRST", ovec[2*i+1] - ovec[2*i], targetxt + ovec[2*i]);
 		}
-#ifdef DBG2
-        for (i = 1; i < rc; i++)
-			printf("i=%i ovec1=%i ovec2=%i\n", i, ovec[2*i], ovec[2*i+1]);
-#endif
 		if(rc>1) { /* end part of string */
 			i--;
-    		printf("%s\n", targetxt+ovec[2*i+1]);
+			printf("%s\n", targetxt+ovec[2*i+1]);
 		}
- 
-    } /* End of loop to find second and subsequent matches */
 
-//	if(!latermatches)
-//		printf("%s\n", targetxt+lastovecel);
-//	else
-//		printf("\n"); 
-	printf("%s\n", targetxt+lastovecel);
-	printf("In total there were %i matches\n", latermatches+1);
-    pcre_free(re); /* Release memory used for the compiled pattern */
+		/**************************************************************************
+		 * That concludes the basic part of this demonstration program. We have    *
+		 * compiled a pattern, and performed a single match. The code that follows *
+		 * shows first how to access named substrings, and then how to code for    *
+		 * repeated matches on the same targetxt.                                   *
+		 **************************************************************************/
+
+		if (!find_all) {
+			pcre_free(re);   /* Release the memory used for the compiled pattern */
+			return 0;        /* Finish unless -g was given */
+		}
+
+		/* now search for all subsequent matches */
+		int latermatches=0;
+		int options, start_offset;
+		for (;;) { /* Infinite loop for second and subsequent matches */
+			options = 0;                 /* Normally no options */
+			start_offset = ovec[1];   /* Start at end of previous match */
+
+			/* If the previous match was for an empty string, we are finished if we are
+			   at the end of the targetxt. Otherwise, arrange to run another match at the
+			   same point to see if a non-empty match can be found. */
+
+			if (ovec[0] == ovec[1]) {
+				if (ovec[0] == ttxtlen) break;
+				//            options = PCRE_NOTEMPTY_ATSTART | PCRE_ANCHORED;
+				options = PCRE_NOTEMPTY | PCRE_ANCHORED;
+			}
+
+			/* Run the next matching operation */
+			rc = pcre_exec(re/* the compiled pattern */, NULL /* no extra studied data */, targetxt, ttxtlen, start_offset, options, ovec, /* output vector for substring information */ OVECCOUNT); /* number of elements in the output vector */
+
+			/* This time, a result of NOMATCH isn't an error. If the value in "options"
+			   is zero, it just means we have found all possible matches, so the loop ends.
+			   Otherwise, it means we have failed to find a non-empty-string match at a
+			   point where there was a previous empty-string match. In this case, we do what
+			   Perl does: advance the matching position by one, and continue. We do this by
+			   setting the "end of previous match" offset, because that is picked up at the
+			   top of the loop as the point at which to start again. */
+			if (rc == PCRE_ERROR_NOMATCH) {
+				if (options == 0)
+					break;
+				ovec[1] = start_offset + 1;
+				continue;    /* Go round the loop again */
+			}
+
+			/* Other matching errors are not recoverable. */
+			if (rc < 0) {
+				printf("Matching error %d\n", rc);
+				goto bailout;
+			}
+
+			/* Match succeded */
+			latermatches++;
+			// printf("Yes, there was another match for this pattern:\n");
+			// printf("%.*s", ovec[0], targetxt);
+			printf("%.*s", ovec[0]-lastovecel, targetxt+lastovecel);
+			oddyes=latermatches%2;
+			printf((oddyes)?"\033[36m%.*s\033[0m":"\033[32m%.*s\033[0m", ovec[1]-ovec[0], targetxt+ovec[0]);
+			lastovecel=ovec[1];
+
+
+			/* The match succeeded, but the output vector wasn't big enough. */
+			if (rc == 0)
+				printf("ovec only has room for %d captured substrings\n", OVECCOUNT/3 - 1);
+
+			/* As before, show substrings stored in the output vector by number, and then
+			   also any named substrings. */
+			for (i = 1; i < rc; i++) {
+				oddyes=i%2;
+				printf("%.*s", ovec[2*i], targetxt);
+				printf((oddyes)?"\033[36m%.*s\033[0m":"\033[32m%.*s\033[0m", ovec[2*i+1] - ovec[2*i], targetxt + ovec[2*i]);
+			}
+#ifdef DBG2
+			for (i = 1; i < rc; i++)
+				printf("i=%i ovec1=%i ovec2=%i\n", i, ovec[2*i], ovec[2*i+1]);
+#endif
+			if(rc>1) { /* end part of string */
+				i--;
+				printf("%s\n", targetxt+ovec[2*i+1]);
+			}
+
+		} /* End of loop to find second and subsequent matches */
+
+		//	if(!latermatches)
+		//		printf("%s\n", targetxt+lastovecel);
+		//	else
+		//		printf("\n"); 
+		printf("%s\n", targetxt+lastovecel);
+		printf("Sequence %i had %i total matches\n", k, latermatches+1);
+	}
+bailout:	pcre_free(re); /* Release memory used for the compiled pattern */
 	for(i=0;i<numsq;++i) {
 		free(sqisz[i].id);
 		free(sqisz[i].sq);
 	}
 	free(sqisz);
-    return 0;
+	return 0;
 }
