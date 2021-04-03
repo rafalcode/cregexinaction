@@ -2,7 +2,8 @@ CC=gcc
 CFLAGS=-O3
 DCFLAGS=-g -Wall -DDBG
 SPECLIBS=-lpcre
-EXECUTABLES=pcredemo dem2 dem3 dem4 dem5 dem5_d dem6 dem7 pcregrep nx2phy_cheap dem5a dem4a gen0 simpd dem22 dem23
+SPECLIBS2=-lpcre2-8
+EXECUTABLES=pcredemo dem2 dem3 dem4 dem5 dem5_d dem6 dem7 pcregrep nx2phy_cheap dem5a dem4a gen0 simpd dem22 dem23 dem24 dem25 pcre2demo
 
 # mm1, an xercise in memory maps ... sys/ctypes-h need to be in place.
 mm1: mm1.c
@@ -10,6 +11,10 @@ mm1: mm1.c
 
 pcredemo: pcredemo.c
 	${CC} ${CFLAGS} -o $@ $^ ${SPECLIBS}
+pcre2demo: pcre2demo.c
+	${CC} ${CFLAGS} -o $@ $^ ${SPECLIBS2}
+dem52: dem52.c
+	${CC} ${CFLAGS} -o $@ $^ ${SPECLIBS2}
 
 dem2: dem2.c
 	${CC} ${CFLAGS} -o $@ $^ ${SPECLIBS}
@@ -20,6 +25,11 @@ dem22: dem22.c
 	${CC} ${CFLAGS} -o $@ $^ ${SPECLIBS}
 dem23: dem23.c
 	${CC} ${CFLAGS} -o $@ $^ ${SPECLIBS}
+# catch the timings.
+dem24: dem24.c
+	${CC} ${CFLAGS} -o $@ $^ ${SPECLIBS}
+dem25: dem25.c
+	${CC} ${CFLAGS} -o $@ $^ ${SPECLIBS2}
 
 dem3: dem3.c
 	${CC} ${CFLAGS} -o $@ $^ ${SPECLIBS}
