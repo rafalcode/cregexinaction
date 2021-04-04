@@ -56,9 +56,34 @@ to be modified. */
 #include <stdio.h>
 #include <string.h>
 #include <pcre2.h>
+#include <math.h>
 #include <sys/stat.h>
 
-#define MYRGX "\\d\\d:\\d\\d:\\d\\d"
+#define MYRGX "(\\d+):(\\d+):(\\d+)"
+#define GBUF 5
+#define CONDREALLOC0(x, b, c, a, t); \
+    if((x)>=((b)-1)) { \
+        (b) += (c); \
+        (a)=realloc((a), (b)*sizeof(t)); \
+        memset(((a)+((b)-(c))), 0, (c)*sizeof(t)); \
+    }
+
+#define CONDREALLOC(x, b, c, a, t); \
+    if((x)>=((b)-1)) { \
+        (b) += (c); \
+        (a)=realloc((a), (b)*sizeof(t)); \
+        for(int i=((b)-(c)); i<(b); ++i) { \
+            (a)[i].h = 0; \
+            (a)[i].m = 0; \
+            (a)[i].s = 0; \
+            (a)[i].hh = 0; \
+        } \
+    }
+
+// following is like atoi (natoi), but does not require \0 at end, only a simplesequence of chars of size n
+#define NATOI(x, cs, n); \
+    for(int i=0; i<(n); ++i) \
+        (x) += ((int)(cs)[i]-48) * pow(10, ((n)-1-(i)));
 
 /**************************************************************************
 * Here is the program. The API includes the concept of "contexts" for     *
@@ -67,6 +92,54 @@ to be modified. */
 * This program does not do any of this, so it makes no use of contexts,   *
 * always passing NULL where a context could be given.                     *
 **************************************************************************/
+
+typedef struct /* tt_c */
+{
+    int h, m, s, hh;
+} tt_c;
+
+typedef struct /* av_c */
+{
+    int vbf, vsz;
+    tt_c *v;
+} av_c;
+
+av_c *crea_avc(int vbf)
+{
+    av_c *avc=malloc(sizeof(av_c));
+    avc->vbf=vbf;
+    avc->v=calloc(avc->vbf, sizeof(tt_c));
+    avc->vsz=0;
+    return avc;
+}
+
+void condrea_avc(av_c *avc)
+{
+    /* somewhat trivial, but idea is that, as avc is a container, it can be re-alloced inside a function */
+    CONDREALLOC(avc->vsz, avc->vbf, GBUF, avc->v, tt_c);
+    return;
+}
+
+void norm_avc(av_c *avc)
+{
+    avc->v=realloc(avc->v, avc->vsz*sizeof(tt_c));
+    return;
+}
+
+void free_avc(av_c *avc)
+{
+    free(avc->v);
+    free(avc);
+    return;
+}
+
+void prtavec(av_c *avc)
+{
+    int i;
+    for(i=0;i<avc->vsz;++i)
+        printf("%i:%i:%i:%i\n", avc->v[i].h, avc->v[i].m, avc->v[i].s, avc->v[i].hh); 
+    return;
+}
 
 int main(int argc, char **argv)
 {
@@ -78,7 +151,6 @@ int main(int argc, char **argv)
     pcre2_code *re;
     PCRE2_SPTR pattern;     /* PCRE2_SPTR is a pointer to unsigned code units of */
     PCRE2_SPTR subject;     /* the appropriate width (in this case, 8 bits). */
-    PCRE2_SPTR name_table;
 
     int crlf_is_newline;
     int errornumber;
@@ -89,7 +161,6 @@ int main(int argc, char **argv)
 
     uint32_t option_bits;
     uint32_t namecount;
-    uint32_t name_entry_size;
     uint32_t newline;
 
     PCRE2_SIZE erroroffset;
@@ -116,9 +187,9 @@ int main(int argc, char **argv)
        cast to PCRE2_SPTR because we are working in 8-bit code units. The subject
        length is cast to PCRE2_SIZE for completeness, though PCRE2_SIZE is in fact
        defined to be size_t. */
-    // pattern = (PCRE2_SPTR)MYRGX;
+    pattern = (PCRE2_SPTR)MYRGX;
     // pattern = (PCRE2_SPTR)"[0-9]+:";
-    pattern = (PCRE2_SPTR)"\\d+:\\d+:\\d+";
+    // pattern = (PCRE2_SPTR)"\\d+:\\d+:\\d+";
     subject = (PCRE2_SPTR)fslurp;
     subject_length = (PCRE2_SIZE)fsta.st_size;
 
@@ -136,16 +207,12 @@ int main(int argc, char **argv)
             NULL);                 /* use default compile context */
 
     /* Compilation failed: print the error message and exit. */
-
-    if (re == NULL)
-    {
+    if (re == NULL) {
         PCRE2_UCHAR buffer[256];
         pcre2_get_error_message(errornumber, buffer, sizeof(buffer));
-        printf("PCRE2 compilation failed at offset %d: %s\n", (int)erroroffset,
-                buffer);
-        return 1;
+        printf("PCRE2 compilation failed at offset %d: %s\n", (int)erroroffset, buffer);
+        exit(EXIT_FAILURE);
     }
-
 
     /*************************************************************************
      * If the compilation succeeded, we call PCRE2 again, in order to do a    *
@@ -175,10 +242,8 @@ int main(int argc, char **argv)
 
     /* Matching failed: handle error cases */
 
-    if (rc < 0)
-    {
-        switch(rc)
-        {
+    if (rc < 0) {
+        switch(rc) {
             case PCRE2_ERROR_NOMATCH: printf("No match\n"); break;
                                       /*
                                          Handle other special cases if you like
@@ -225,14 +290,26 @@ int main(int argc, char **argv)
 
     /* Show substrings stored in the output vector by number. Obviously, in a real
        application you might want to do things other than print them. */
-
-    for (i = 0; i < rc; i++)
-    {
+    av_c *avc=crea_avc(GBUF);
+    int cou=0;
+    for (i = 0; i < rc; i++) {
         PCRE2_SPTR substring_start = subject + ovector[2*i];
         PCRE2_SIZE substring_length = ovector[2*i+1] - ovector[2*i];
-        printf("%2d: %.*s\n", i, (int)substring_length, (char *)substring_start);
+        // printf("%2d: %.*s\n", i, (int)substring_length, (char *)substring_start);
+        switch(i) {
+            case 1:
+                NATOI(avc->v[avc->vsz].h, (char*)substring_start, (int)substring_length);
+                break;
+            case 2:
+                NATOI(avc->v[avc->vsz].m, (char*)substring_start, (int)substring_length);
+                break;
+            case 3:
+                NATOI(avc->v[avc->vsz].s, (char*)substring_start, (int)substring_length);
+                break;
+        }
     }
-
+    printf("first timerec: %i:%i:%i\n", avc->v[cou].h, avc->v[cou].m, avc->v[cou].s);
+    avc->vsz++;
 
     /**************************************************************************
      * That concludes the basic part of this demonstration program. We have    *
@@ -249,38 +326,10 @@ int main(int argc, char **argv)
             PCRE2_INFO_NAMECOUNT, /* get the number of named substrings */
             &namecount);          /* where to put the answer */
 
-    if (namecount == 0) printf("No named substrings\n"); else
-    {
-        PCRE2_SPTR tabptr;
-        printf("Named substrings\n");
-
-        /* Before we can access the substrings, we must extract the table for
-           translating names to numbers, and the size of each entry in the table. */
-
-        (void)pcre2_pattern_info(
-                re,                       /* the compiled pattern */
-                PCRE2_INFO_NAMETABLE,     /* address of the table */
-                &name_table);             /* where to put the answer */
-
-        (void)pcre2_pattern_info(
-                re,                       /* the compiled pattern */
-                PCRE2_INFO_NAMEENTRYSIZE, /* size of each entry in the table */
-                &name_entry_size);        /* where to put the answer */
-
-        /* Now we can scan the table and, for each entry, print the number, the name,
-           and the substring itself. In the 8-bit library the number is held in two
-           bytes, most significant first. */
-
-        tabptr = name_table;
-        for (i = 0; i < namecount; i++)
-        {
-            int n = (tabptr[0] << 8) | tabptr[1];
-            printf("(%d) %*s: %.*s\n", n, name_entry_size - 3, tabptr + 2,
-                    (int)(ovector[2*n+1] - ovector[2*n]), subject + ovector[2*n]);
-            tabptr += name_entry_size;
-        }
+    if(namecount != 0) {
+        printf("No named substrings allowed.\n");
+        exit(EXIT_FAILURE);
     }
-
 
     /*************************************************************************
      * If the "-g" option was given on the command line, we want to continue  *
@@ -311,8 +360,7 @@ int main(int argc, char **argv)
      * be set in the regex by (*CR), etc.; if not, we must find the default.  *
      *************************************************************************/
 
-    if (!find_all)     /* Check for -g */
-    {
+    if (!find_all) {     /* Check for -g */
         pcre2_match_data_free(match_data);  /* Release the memory that was used */
         pcre2_code_free(re);                /* for the match data and the pattern. */
         return 0;                           /* Exit the program. */
@@ -321,22 +369,17 @@ int main(int argc, char **argv)
     /* Before running the loop, check for UTF-8 and whether CRLF is a valid newline
        sequence. First, find the options with which the regex was compiled and extract
        the UTF state. */
-
     (void)pcre2_pattern_info(re, PCRE2_INFO_ALLOPTIONS, &option_bits);
     utf8 = (option_bits & PCRE2_UTF) != 0;
 
-    /* Now find the newline convention and see whether CRLF is a valid newline
-       sequence. */
-
+    /* Now find the newline convention and see whether CRLF is a valid newline sequence. */
     (void)pcre2_pattern_info(re, PCRE2_INFO_NEWLINE, &newline);
     crlf_is_newline = newline == PCRE2_NEWLINE_ANY ||
         newline == PCRE2_NEWLINE_CRLF ||
         newline == PCRE2_NEWLINE_ANYCRLF;
 
     /* Loop for second and subsequent matches */
-
-    for (;;)
-    {
+    for (;;) {
         uint32_t options = 0;                   /* Normally no options */
         PCRE2_SIZE start_offset = ovector[1];   /* Start at end of previous match */
 
@@ -344,12 +387,9 @@ int main(int argc, char **argv)
            at the end of the subject. Otherwise, arrange to run another match at the
            same point to see if a non-empty match can be found. */
 
-        if (ovector[0] == ovector[1])
-        {
+        if (ovector[0] == ovector[1]) {
             if (ovector[0] == subject_length) break;
             options = PCRE2_NOTEMPTY_ATSTART | PCRE2_ANCHORED;
-        }
-
         /* If the previous match was not an empty string, there is one tricky case to
            consider. If a pattern contains \K within a lookbehind assertion at the
            start, the end of the matched string can be at the offset where the match
@@ -357,12 +397,9 @@ int main(int argc, char **argv)
            the same substring. We must detect this case and arrange to move the start on
            by one character. The pcre2_get_startchar() function returns the starting
            offset that was passed to pcre2_match(). */
-
-        else
-        {
+        } else {
             PCRE2_SIZE startchar = pcre2_get_startchar(match_data);
-            if (start_offset <= startchar)
-            {
+            if (start_offset <= startchar) {
                 if (startchar >= subject_length) break;   /* Reached end of subject.   */
                 start_offset = startchar + 1;             /* Advance by one character. */
                 if (utf8)                                 /* If UTF-8, it may be more  */
@@ -397,8 +434,7 @@ int main(int argc, char **argv)
            Otherwise we must ensure that we skip an entire UTF character if we are in
            UTF mode. */
 
-        if (rc == PCRE2_ERROR_NOMATCH)
-        {
+        if (rc == PCRE2_ERROR_NOMATCH) {
             if (options == 0) break;                    /* All matches found */
             ovector[1] = start_offset + 1;              /* Advance one code unit */
             if (crlf_is_newline &&                      /* If CRLF is a newline & */
@@ -418,9 +454,7 @@ int main(int argc, char **argv)
         }
 
         /* Other matching errors are not recoverable. */
-
-        if (rc < 0)
-        {
+        if (rc < 0) {
             printf("Matching error %d\n", rc);
             pcre2_match_data_free(match_data);
             pcre2_code_free(re);
@@ -428,8 +462,8 @@ int main(int argc, char **argv)
         }
 
         /* Match succeded */
-
         printf("\nMatch succeeded again at offset %d\n", (int)ovector[0]);
+        condrea_avc(avc); // get ready
 
         /* The match succeeded, but the output vector wasn't big enough. This
            should not happen. */
@@ -441,8 +475,7 @@ int main(int argc, char **argv)
            assertion to set the start of a match later than its end. In this
            demonstration program, we just detect this case and give up. */
 
-        if (ovector[0] > ovector[1])
-        {
+        if (ovector[0] > ovector[1]) {
             printf("\\K was used in an assertion to set the match start after its end.\n"
                     "From end to start the match was: %.*s\n", (int)(ovector[0] - ovector[1]),
                     (char *)(subject + ovector[1]));
@@ -454,31 +487,36 @@ int main(int argc, char **argv)
 
         /* As before, show substrings stored in the output vector by number, and then
            also any named substrings. */
-
-        for (i = 0; i < rc; i++)
-        {
+        for (i = 0; i < rc; i++) {
             PCRE2_SPTR substring_start = subject + ovector[2*i];
             size_t substring_length = ovector[2*i+1] - ovector[2*i];
-            printf("%2d: %.*s\n", i, (int)substring_length, (char *)substring_start);
-        }
-
-        if (namecount == 0) printf("No named substrings\n"); else
-        {
-            PCRE2_SPTR tabptr = name_table;
-            printf("Named substrings\n");
-            for (i = 0; i < namecount; i++)
-            {
-                int n = (tabptr[0] << 8) | tabptr[1];
-                printf("(%d) %*s: %.*s\n", n, name_entry_size - 3, tabptr + 2,
-                        (int)(ovector[2*n+1] - ovector[2*n]), subject + ovector[2*n]);
-                tabptr += name_entry_size;
+            // printf("%2d: %.*s\n", i, (int)substring_length, (char *)substring_start);
+            switch(i) {
+                case 1:
+                    NATOI(avc->v[avc->vsz].h, (char*)substring_start, (int)substring_length);
+                    break;
+                case 2:
+                    NATOI(avc->v[avc->vsz].m, (char*)substring_start, (int)substring_length);
+                    break;
+                case 3:
+                    NATOI(avc->v[avc->vsz].s, (char*)substring_start, (int)substring_length);
+                    break;
             }
+        }
+        avc->vsz++;
+
+        if(namecount != 0) {
+            printf("No named substrings allowed.\n");
+            exit(EXIT_FAILURE);
         }
     }      /* End of loop to find second and subsequent matches */
 
-    printf("\n");
+    // avc->vsz=cou;
+    norm_avc(avc);
+    prtavec(avc);
     pcre2_match_data_free(match_data);
     pcre2_code_free(re);
+    free_avc(avc);
     free(fslurp);
     return 0;
 }
